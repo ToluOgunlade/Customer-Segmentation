@@ -1,2 +1,2 @@
 # Customer-Segmentation
-Customer Segmentation: Analysed Prism's customer base to group users by demographics, behaviour, and spending patterns. Used SQL and data visualisation tools to identify high-value segments, tailor marketing strategies, and improve customer retention."  This highlights the objective, tools, and actionable outcomes of the project.
+Customer Segmentation: Analysed marketing opt-in behaviour using SQL and data visualisation tools to assess the effectiveness of marketing ads. Evaluated revenue trends over time and identified strategies to convert non-opted-in customers and registered users who hadn’t opted in. Provided actionable insights to optimise targeting, enhance engagement, and increase revenue.
