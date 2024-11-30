@@ -1,0 +1,557 @@
+--Recent Purchases (In this code DISTINCT registered users were not filtered)
+WITH max_date AS (
+  -- Find the latest date in the dataset
+  SELECT MAX(latest_purchase_date) AS latest_available_date
+  FROM `prism-insights.prism_acquire.users`
+  WHERE latest_purchase_date IS NOT NULL
+),
+recent_users AS (
+  SELECT
+    user_crm_id,
+    latest_purchase_date,
+    DATE_DIFF((SELECT latest_available_date FROM max_date), latest_purchase_date, DAY) AS recency_days
+  FROM
+    `prism-insights.prism_acquire.users`
+  WHERE
+    opt_in_status = TRUE
+    AND latest_purchase_date IS NOT NULL
+)
+SELECT
+  user_crm_id,
+  recency_days,
+  CASE
+    WHEN recency_days <= 180 THEN 'Very Recent (0-180 days)'
+    WHEN recency_days BETWEEN 181 AND 730 THEN 'Inactive (181-730 days)'
+    ELSE 'Lost (731+ days)'
+  END AS recency_segment
+FROM recent_users
+GROUP BY user_crm_id, recency_days
+ORDER BY recency_days ASC;
+
+--*******************************************************************************
+--(In this code DISTINCT registered users were filtered)
+WITH opted_in_users AS (
+  -- Filter users who have opted in for marketing
+  SELECT DISTINCT user_crm_id
+  FROM `prism-insights.prism_acquire.users`
+  WHERE opt_in_status = TRUE
+),
+user_with_valid_transactions AS (
+  -- Filter users who have made at least one valid transaction (with non-null monetary value)
+  SELECT DISTINCT t.user_crm_id
+  FROM `prism-insights.prism_acquire.transactions` t
+  JOIN opted_in_users u
+    ON t.user_crm_id = u.user_crm_id
+  WHERE t.transaction_total IS NOT NULL
+),
+max_date AS (
+  -- Find the latest date in the dataset
+  SELECT MAX(latest_purchase_date) AS latest_available_date
+  FROM `prism-insights.prism_acquire.users`
+  WHERE latest_purchase_date IS NOT NULL
+),
+recent_users AS (
+  -- Get recency data for users with valid transactions
+  SELECT
+    u.user_crm_id,
+    MAX(latest_purchase_date) AS latest_purchase_date, -- Group by user and get the most recent date
+    DATE_DIFF((SELECT latest_available_date FROM max_date), MAX(latest_purchase_date), DAY) AS recency_days
+  FROM
+    `prism-insights.prism_acquire.users` u
+  JOIN user_with_valid_transactions uwt
+    ON u.user_crm_id = uwt.user_crm_id
+  WHERE
+    u.latest_purchase_date IS NOT NULL
+  GROUP BY u.user_crm_id -- Ensure no duplicates by grouping by user_crm_id
+)
+-- Final segmentation based on recency
+SELECT
+  user_crm_id,
+  recency_days,
+  CASE
+    WHEN recency_days <= 180 THEN 'Very Recent (0-180 days)'
+    WHEN recency_days BETWEEN 181 AND 730 THEN 'Inactive (181-730 days)'
+    ELSE 'Lost (731+ days)'
+  END AS recency_segment
+FROM recent_users
+ORDER BY recency_days ASC;
+--**************************************************************************************************************************
+--Frequent Purchases
+WITH opted_in_users AS (
+  -- Filter users who have opted in for marketing
+  SELECT DISTINCT user_crm_id
+  FROM `prism-insights.prism_acquire.users`
+  WHERE opt_in_status = TRUE
+),
+user_frequency AS (
+  -- Count the frequency of transactions per user
+  SELECT
+    u.user_crm_id,
+    COUNT(t.transaction_id) AS transaction_count
+  FROM opted_in_users u
+  JOIN `prism-insights.prism_acquire.transactions` t
+    ON u.user_crm_id = t.user_crm_id
+  GROUP BY u.user_crm_id
+),
+segmented_users AS (
+  -- Segment users into 3 buckets based on transaction count (frequency)
+  SELECT 
+    user_crm_id,
+    transaction_count,
+    NTILE(3) OVER (ORDER BY transaction_count DESC) AS frequency_segment
+  FROM user_frequency
+)
+-- Display the results
+SELECT * 
+FROM segmented_users;
+
+--**************************************************************************
+WITH opted_in_users AS (
+  -- Filter users who have opted in for marketing
+  SELECT DISTINCT user_crm_id
+  FROM `prism-insights.prism_acquire.users`
+  WHERE opt_in_status = TRUE
+),
+user_frequency AS (
+  -- Count the frequency of transactions per user
+  SELECT
+    u.user_crm_id,
+    COUNT(t.transaction_id) AS transaction_count
+  FROM opted_in_users u
+  JOIN `prism-insights.prism_acquire.transactions` t
+    ON u.user_crm_id = t.user_crm_id
+  GROUP BY u.user_crm_id
+),
+segmented_users AS (
+  SELECT 
+    user_crm_id,
+    transaction_count,
+    CASE
+      WHEN transaction_count >= 10 THEN '1'
+      WHEN transaction_count BETWEEN 5 AND 9 THEN '2'
+      WHEN transaction_count BETWEEN 1 AND 4 THEN '3'
+      ELSE 'No Purchase'
+    END AS frequency_segment
+  FROM user_frequency
+)
+-- Display the results
+SELECT * 
+FROM segmented_users;
+
+--**************************************************************************
+WITH opted_in_users AS (
+  -- Filter users who have opted in for marketing
+  SELECT DISTINCT user_crm_id
+  FROM `prism-insights.prism_acquire.users`
+  WHERE opt_in_status = TRUE
+),
+user_frequency AS (
+  -- Count the frequency of transactions per user
+  SELECT
+    u.user_crm_id,
+    COUNT(t.transaction_id) AS transaction_count
+  FROM opted_in_users u
+  JOIN `prism-insights.prism_acquire.transactions` t
+    ON u.user_crm_id = t.user_crm_id
+  GROUP BY u.user_crm_id
+),
+segmented_users AS (
+  SELECT 
+    user_crm_id,
+    transaction_count,
+    CASE
+      WHEN transaction_count >= 5 THEN '1'
+      WHEN transaction_count BETWEEN 2 AND 4 THEN '2'
+      WHEN transaction_count = 1  THEN '3'
+      ELSE 'No Purchase'
+    END AS frequency_segment
+  FROM user_frequency
+)
+-- Display the results
+SELECT * 
+FROM segmented_users;
+
+--**********************************************************************
+--How much people spent
+WITH opted_in_users AS (
+  -- Filter users who have opted in for marketing
+  SELECT DISTINCT user_crm_id
+  FROM `prism-insights.prism_acquire.users`
+  WHERE opt_in_status = TRUE
+),
+user_monetary AS (
+  -- Count the monetary value per user
+  SELECT
+    u.user_crm_id,
+    SUM(t.transaction_total) AS monetary_value
+  FROM opted_in_users u
+  JOIN `prism-insights.prism_acquire.transactions` t
+    ON u.user_crm_id = t.user_crm_id
+  GROUP BY u.user_crm_id
+)
+-- Display the results
+SELECT 
+user_crm_id,
+  CASE WHEN monetary_value >= 100 THEN '1'
+  WHEN monetary_value BETWEEN 25 AND 99 THEN '2'
+  ELSE '3' END AS buckets
+FROM user_monetary
+ORDER BY monetary_value DESC;
+
+--********************************************************************************
+--How much people spent
+WITH opted_in_users AS (
+  -- Filter users who have opted in for marketing
+  SELECT DISTINCT user_crm_id
+  FROM `prism-insights.prism_acquire.users`
+  WHERE opt_in_status = TRUE
+),
+user_monetary AS (
+  -- Count the monetary value per user
+  SELECT
+    u.user_crm_id, t.transaction_total,
+    SUM(t.transaction_total) AS monetary_value
+  FROM opted_in_users u
+  JOIN `prism-insights.prism_acquire.transactions` t
+    ON u.user_crm_id = t.user_crm_id
+  GROUP BY u.user_crm_id, t.transaction_total
+)
+-- Display the results
+SELECT 
+user_crm_id, transaction_total,
+  CASE WHEN monetary_value >= 100 THEN '1'
+  WHEN monetary_value BETWEEN 25 AND 99 THEN '2'
+  ELSE '3' END AS buckets
+FROM user_monetary
+ORDER BY monetary_value DESC;
+
+
+--****************************************************
+WITH opted_in_users AS (
+  -- Filter users who have opted in for marketing
+  SELECT DISTINCT user_crm_id
+  FROM `prism-insights.prism_acquire.users`
+  WHERE opt_in_status = TRUE
+),
+user_monetary AS (
+  -- Count the monetary value per user
+  SELECT
+    u.user_crm_id, t.transaction_total,
+    SUM(t.transaction_total) AS monetary_value
+  FROM opted_in_users u
+  JOIN `prism-insights.prism_acquire.transactions` t
+    ON u.user_crm_id = t.user_crm_id
+  GROUP BY u.user_crm_id, t.transaction_total
+)
+-- Display the results
+SELECT 
+user_crm_id,
+  CASE WHEN monetary_value >= 50 THEN 'High Monetary'
+  WHEN monetary_value BETWEEN 25 AND 49 THEN 'Medium Monetary'
+  ELSE 'Low Monetary' END AS buckets
+FROM user_monetary
+ORDER BY monetary_value DESC;
+
+--*****************************************************************************************************************
+
+
+--********************************************************************************
+--Score card 
+WITH opted_in_users AS (
+  -- Filter users who have opted in for marketing
+  SELECT DISTINCT user_crm_id
+  FROM `prism-insights.prism_acquire.users`
+  WHERE opt_in_status = TRUE
+),
+user_monetary AS (
+  -- Count the monetary value per user
+  SELECT
+    u.user_crm_id,
+    SUM(t.transaction_total) AS monetary_value
+  FROM opted_in_users u
+  JOIN `prism-insights.prism_acquire.transactions` t
+    ON u.user_crm_id = t.user_crm_id
+  GROUP BY u.user_crm_id
+),
+monetary_buckets AS (
+SELECT
+user_crm_id,
+  CASE WHEN monetary_value >= 50 THEN '1'
+  WHEN monetary_value BETWEEN 25 AND 49 THEN '2'
+  ELSE '3' END AS m_buckets
+FROM user_monetary
+ORDER BY monetary_value DESC
+),
+max_date AS (
+  -- Find the latest date in the dataset
+  SELECT MAX(latest_purchase_date) AS latest_available_date
+  FROM `prism-insights.prism_acquire.users`
+  WHERE latest_purchase_date IS NOT NULL
+),
+recent_users AS (
+  SELECT
+    user_crm_id,
+    latest_purchase_date,
+    DATE_DIFF((SELECT latest_available_date FROM max_date), latest_purchase_date, DAY) AS recency_days
+  FROM
+    `prism-insights.prism_acquire.users`
+  WHERE
+    opt_in_status = TRUE
+    AND latest_purchase_date IS NOT NULL
+),
+recency_buckets AS (
+  SELECT
+  user_crm_id,
+  CASE
+    WHEN recency_days BETWEEN 0 AND 180 THEN '1'
+    WHEN recency_days BETWEEN 181 AND 730 THEN '2'
+    WHEN recency_days >= 731 THEN '3'
+    ELSE 'Not Recent' END AS r_buckets
+FROM recent_users
+GROUP BY user_crm_id, recency_days
+),
+user_frequency AS (
+  -- Count the frequency of transactions per user
+  SELECT
+    u.user_crm_id,
+    COUNT(t.transaction_id) AS transaction_count
+  FROM opted_in_users u
+  JOIN `prism-insights.prism_acquire.transactions` t
+    ON u.user_crm_id = t.user_crm_id
+  GROUP BY u.user_crm_id
+),
+frequency_buckets AS (
+  SELECT
+    user_crm_id,
+    transaction_count,
+    CASE
+      WHEN transaction_count >= 10 THEN '1'
+      WHEN transaction_count BETWEEN 5 AND 9 THEN '2'
+      WHEN transaction_count BETWEEN 1 AND 4 THEN '3'
+      ELSE 'No Purchase'
+    END AS f_buckets
+  FROM user_frequency
+)
+SELECT r.user_crm_id, r.r_buckets, f.f_buckets, m.m_buckets,
+FROM recency_buckets AS r
+INNER JOIN frequency_buckets AS f
+USING (user_crm_id)
+INNER JOIN monetary_buckets AS m
+USING (user_crm_id)
+GROUP BY user_crm_id, r_buckets, f_buckets, m_buckets
+ORDER BY f_buckets;
+
+--*************************************************************************************************************************
+WITH opted_in_users AS (
+  -- Filter users who have opted in for marketing
+  SELECT DISTINCT user_crm_id
+  FROM `prism-insights.prism_acquire.users`
+  WHERE opt_in_status = TRUE
+),
+user_monetary AS (
+  -- Sum the monetary value per user
+  SELECT
+    u.user_crm_id,
+    SUM(t.transaction_total) AS monetary_value
+  FROM opted_in_users u
+  JOIN `prism-insights.prism_acquire.transactions` t
+    ON u.user_crm_id = t.user_crm_id
+  GROUP BY u.user_crm_id
+),
+monetary_buckets AS (
+  --Sort users into Monetary Buckets
+SELECT 
+user_crm_id,
+  CASE WHEN monetary_value >= 50 THEN '1'
+  WHEN monetary_value BETWEEN 25 AND 49 THEN '2'
+  ELSE '3' END AS m_buckets
+FROM user_monetary
+ORDER BY monetary_value DESC
+),
+
+user_with_valid_transactions AS (
+  -- Filter users who have made at least one valid transaction (with non-null monetary value)
+  SELECT DISTINCT t.user_crm_id
+  FROM `prism-insights.prism_acquire.transactions` t
+  JOIN opted_in_users u
+    ON t.user_crm_id = u.user_crm_id
+  WHERE t.transaction_total IS NOT NULL
+),
+max_date AS (
+  -- Find the latest date in the dataset
+  SELECT MAX(latest_purchase_date) AS latest_available_date
+  FROM `prism-insights.prism_acquire.users`
+  WHERE latest_purchase_date IS NOT NULL
+),
+recent_users AS (
+  -- Get recency data for users with valid transactions
+  SELECT
+    u.user_crm_id,
+    MAX(latest_purchase_date) AS latest_purchase_date, -- Group by user and get the most recent date
+    DATE_DIFF((SELECT latest_available_date FROM max_date), MAX(latest_purchase_date), DAY) AS recency_days
+  FROM
+    `prism-insights.prism_acquire.users` u
+  JOIN user_with_valid_transactions uwt
+    ON u.user_crm_id = uwt.user_crm_id
+  WHERE
+    u.latest_purchase_date IS NOT NULL
+  GROUP BY u.user_crm_id -- Ensure no duplicates by grouping by user_crm_id
+),
+recency_buckets AS (
+-- Sort the customers into Recency buckets
+SELECT
+  user_crm_id,
+  recency_days,
+  CASE
+    WHEN recency_days <= 180 THEN '1'
+    WHEN recency_days BETWEEN 181 AND 730 THEN '2'
+    ELSE '3'
+  END AS r_buckets
+FROM recent_users
+ORDER BY recency_days ASC
+),
+
+user_frequency AS (
+  -- Count the frequency of transactions per user
+  SELECT
+    u.user_crm_id,
+    COUNT(t.transaction_id) AS transaction_count
+  FROM opted_in_users u
+  JOIN `prism-insights.prism_acquire.transactions` t
+    ON u.user_crm_id = t.user_crm_id
+  GROUP BY u.user_crm_id
+),
+frequency_buckets AS (
+  --Sort the customers into Frequency buckets
+  SELECT 
+    user_crm_id,
+    transaction_count,
+    CASE
+      WHEN transaction_count >= 10 THEN '1'
+      WHEN transaction_count BETWEEN 5 AND 9 THEN '2'
+      WHEN transaction_count BETWEEN 1 AND 4 THEN '3'
+      ELSE 'No Purchase'
+    END AS f_buckets
+  FROM user_frequency
+)
+
+--Show the users and their bucket numbers
+SELECT r.user_crm_id, r.r_buckets, f.f_buckets, m.m_buckets, 
+FROM recency_buckets AS r
+INNER JOIN frequency_buckets AS f
+USING (user_crm_id)
+INNER JOIN monetary_buckets AS m
+USING (user_crm_id)
+GROUP BY user_crm_id, r_buckets, f_buckets, m_buckets
+ORDER BY r_buckets, f_buckets, m_buckets;
+
+--**********************************************************************************************************************************
+WITH opted_in_users AS (
+  -- Filter users who have opted in for marketing
+  SELECT DISTINCT user_crm_id
+  FROM `prism-insights.prism_acquire.users`
+  WHERE opt_in_status = TRUE
+),
+user_monetary AS (
+  -- Sum the monetary value per user
+  SELECT
+    u.user_crm_id,
+    SUM(t.transaction_total) AS monetary_value
+  FROM opted_in_users u
+  JOIN `prism-insights.prism_acquire.transactions` t
+    ON u.user_crm_id = t.user_crm_id
+  GROUP BY u.user_crm_id
+),
+monetary_buckets AS (
+  --Sort users into Monetary Buckets
+SELECT 
+user_crm_id,
+  CASE WHEN monetary_value >= 50 THEN '3'
+  WHEN monetary_value BETWEEN 25 AND 49 THEN '2'
+  ELSE '1' END AS m_buckets
+FROM user_monetary
+ORDER BY monetary_value DESC
+),
+
+user_with_valid_transactions AS (
+  -- Filter users who have made at least one valid transaction (with non-null monetary value)
+  SELECT DISTINCT t.user_crm_id
+  FROM `prism-insights.prism_acquire.transactions` t
+  JOIN opted_in_users u
+    ON t.user_crm_id = u.user_crm_id
+  WHERE t.transaction_total IS NOT NULL
+),
+max_date AS (
+  -- Find the latest date in the dataset
+  SELECT MAX(latest_purchase_date) AS latest_available_date
+  FROM `prism-insights.prism_acquire.users`
+  WHERE latest_purchase_date IS NOT NULL
+),
+recent_users AS (
+  -- Get recency data for users with valid transactions
+  SELECT
+    u.user_crm_id,
+    MAX(latest_purchase_date) AS latest_purchase_date, -- Group by user and get the most recent date
+    DATE_DIFF((SELECT latest_available_date FROM max_date), MAX(latest_purchase_date), DAY) AS recency_days
+  FROM
+    `prism-insights.prism_acquire.users` u
+  JOIN user_with_valid_transactions uwt
+    ON u.user_crm_id = uwt.user_crm_id
+  WHERE
+    u.latest_purchase_date IS NOT NULL
+  GROUP BY u.user_crm_id -- Ensure no duplicates by grouping by user_crm_id
+),
+recency_buckets AS (
+-- Sort the customers into Recency buckets
+SELECT
+  user_crm_id,
+  recency_days,
+  CASE
+    WHEN recency_days <= 180 THEN '3'
+    WHEN recency_days BETWEEN 181 AND 730 THEN '2'
+    ELSE '1'
+  END AS r_buckets
+FROM recent_users
+ORDER BY recency_days ASC
+),
+
+user_frequency AS (
+  -- Count the frequency of transactions per user
+  SELECT
+    u.user_crm_id,
+    COUNT(t.transaction_id) AS transaction_count
+  FROM opted_in_users u
+  JOIN `prism-insights.prism_acquire.transactions` t
+    ON u.user_crm_id = t.user_crm_id
+  GROUP BY u.user_crm_id
+),
+frequency_buckets AS (
+  --Sort the customers into Frequency buckets
+  SELECT 
+    user_crm_id,
+    transaction_count,
+    CASE
+      WHEN transaction_count >= 5 THEN '3'
+      WHEN transaction_count BETWEEN 2 AND 4 THEN '2'
+      WHEN transaction_count = 1 THEN '1'
+      ELSE 'No Purchase'
+    END AS f_buckets
+  FROM user_frequency
+)
+
+--Show the users and their bucket numbers
+SELECT r.user_crm_id,
+CASE 
+  WHEN r_buckets = '3' AND CAST(f_buckets AS INTEGER) + CAST(m_buckets AS INTEGER) >= 5 THEN 'Champions'
+  WHEN r_buckets = '3' AND CAST(f_buckets AS INTEGER) + CAST(m_buckets AS INTEGER) >= 3 THEN 'Loyal'
+  WHEN r_buckets = '3' AND CAST(f_buckets AS INTEGER) + CAST(m_buckets AS INTEGER) >= 1 THEN 'Recent'
+  WHEN r_buckets = '2' AND CAST(f_buckets AS INTEGER) + CAST(m_buckets AS INTEGER) >= 4 THEN 'High Potential'
+  WHEN r_buckets = '2' AND CAST(f_buckets AS INTEGER) + CAST(m_buckets AS INTEGER) >= 1 THEN 'Need Nuturing'
+  ELSE 'Inactive' END AS personas
+FROM recency_buckets AS r
+INNER JOIN frequency_buckets AS f
+USING (user_crm_id)
+INNER JOIN monetary_buckets AS m
+USING (user_crm_id)
+GROUP BY user_crm_id, personas;
+
